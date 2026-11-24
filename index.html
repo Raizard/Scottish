@@ -22,6 +22,9 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
   </button>
 </div></div>
+<!-- Optional online libraries for phone controllers. The game still runs fully offline without them. -->
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script>
 'use strict';
 // =====================================================================
@@ -206,6 +209,7 @@ for (let i = 0; i < 4; i++) SRC.push({ type: 'gp', i, connected: false, l: false
 function srcLabel(si) {
   const s = SRC[si];
   if (s.type === 'kb') return { a: KB[s.i].label, b: KB[s.i].keys };
+  if (s.type === 'ph') return { a: 'Phone ' + s.phone + (s.quad ? ' · zone ' + (s.seat + 1) : ''), b: 'Touch controls' };
   return { a: 'Gamepad ' + (s.i + 1), b: 'Stick/D-pad · A' };
 }
 function pollInput() {
@@ -233,7 +237,114 @@ function pollInput() {
     const bk = b(1); s.ebk = bk && !s.pbk; s.pbk = bk;
     const sel = b(8) || b(4) || b(5); s.esel = sel && !s.psel; s.psel = sel;
   }
+  for (let i = 8; i < SRC.length; i++) {
+    const s = SRC[i];
+    if (!s.connected) { s.l = s.r = s.j = s.pj = false; s.ej = s.est = s.ebk = s.esel = false; s.tap = s.stTap = false; continue; }
+    s.l = s.rl; s.r = s.rr;
+    s.ej = s.tap || (s.rj && !s.pj); s.tap = false;
+    s.j = s.rj; s.pj = s.rj; if (s.ej) s.jp = true;
+    s.est = s.stTap; s.stTap = false; s.ebk = false; s.esel = false;
+  }
   tapped.clear();
+}
+
+// ---------------------------------------------------------------------
+//  Phone controllers: the PC hosts a PeerJS (WebRTC) room, phones join it
+//  by scanning the QR code, which opens controller.html on the same site.
+// ---------------------------------------------------------------------
+const NET = { status: 'off', code: '', url: '', qr: null, phones: [], count: 0 };
+const ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] };
+function peerOptions() {
+  const q = new URLSearchParams(location.search), o = { config: ICE };
+  if (q.get('peerhost')) { o.host = q.get('peerhost'); o.port = +q.get('peerport') || 9000; o.path = q.get('peerpath') || '/'; o.secure = q.get('peersecure') === '1'; }
+  return o;
+}
+function netInit() {
+  if (!/^https?:$/.test(location.protocol)) { NET.status = 'local'; return; }
+  if (!window.Peer) { NET.status = 'nolib'; return; }
+  startPeer();
+}
+function startPeer() {
+  const AL = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  NET.code = Array.from({ length: 5 }, () => AL[Math.floor(Math.random() * AL.length)]).join('');
+  NET.status = 'connecting';
+  const peer = new Peer('crushcourse-' + NET.code.toLowerCase(), peerOptions());
+  NET.peer = peer;
+  peer.on('open', () => {
+    NET.status = 'ready';
+    const u = new URL('controller.html', location.href);
+    u.search = location.search; u.hash = NET.code;
+    NET.url = u.href;
+    NET.qr = makeQR(NET.url);
+  });
+  peer.on('connection', setupPhone);
+  peer.on('disconnected', () => { if (NET.status === 'ready') NET.status = 'reconnecting'; setTimeout(() => { if (!peer.destroyed && peer.disconnected) peer.reconnect(); }, 2000); });
+  peer.on('error', err => {
+    if (err.type === 'unavailable-id') { peer.destroy(); startPeer(); return; }
+    if (err.type === 'browser-incompatible') { NET.status = 'nolib'; return; }
+    if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type)) {
+      NET.status = 'reconnecting';
+      setTimeout(() => { if (!peer.destroyed && peer.disconnected) peer.reconnect(); }, 3000);
+    }
+  });
+}
+function makeQR(text) {
+  if (!window.qrcode) return null;
+  try {
+    const q = qrcode(0, 'M'); q.addData(text); q.make();
+    const n = q.getModuleCount(), m = [];
+    for (let r = 0; r < n; r++) { const row = []; for (let c = 0; c < n; c++) row.push(q.isDark(r, c)); m.push(row); }
+    return m;
+  } catch (e) { return null; }
+}
+function setupPhone(conn) {
+  const ph = { conn, no: ++NET.count, seats: [], last: performance.now(), open: false, sent: '' };
+  for (let k = 0; k < 4; k++) {
+    const src = { type: 'ph', phone: ph.no, seat: k, quad: true, connected: false, rl: false, rr: false, rj: false, tap: false, stTap: false,
+      l: false, r: false, j: false, pj: false, jp: false, ej: false, est: false, ebk: false, esel: false };
+    SRC.push(src); ph.seats.push(src);
+  }
+  NET.phones.push(ph);
+  const drop = () => {
+    if (!ph.open && !ph.seats[0].connected) return;
+    ph.open = false; for (const s of ph.seats) s.connected = false;
+    NET.phones = NET.phones.filter(x => x !== ph);
+    G.toast = { text: `📱 Phone ${ph.no} disconnected`, t: 2 };
+  };
+  conn.on('open', () => { ph.open = true; G.toast = { text: `📱 Phone ${ph.no} connected`, t: 2 }; SFX.select(); sendAssign(ph, true); });
+  conn.on('data', msg => {
+    if (!msg || msg.t !== 's' || !Array.isArray(msg.b)) return;
+    ph.last = performance.now();
+    const quad = msg.m !== 'single';
+    ph.seats.forEach((s, k) => {
+      const live = ph.open && (quad || k === 0);
+      if (!live) { s.connected = false; s.rl = s.rr = s.rj = false; return; }
+      s.connected = true; s.quad = quad;
+      const b = msg.b[k] | 0;
+      const j = !!(b & 4);
+      if (j && !s.rj) s.tap = true;
+      if (msg.st && msg.stId !== ph.stId) s.stTap = true;
+      s.rl = !!(b & 1); s.rr = !!(b & 2); s.rj = j;
+    });
+    if (msg.st) ph.stId = msg.stId;
+  });
+  conn.on('close', drop);
+  conn.on('error', drop);
+  ph.drop = drop;
+}
+function sendAssign(ph, force) {
+  const seats = ph.seats.map(s => { const si = SRC.indexOf(s); return G.slots.findIndex(x => x && x.src === si); });
+  const msg = JSON.stringify({ t: 'a', s: seats, g: G.state });
+  if (!force && msg === ph.sent) return;
+  ph.sent = msg;
+  try { ph.conn.send({ t: 'a', s: seats, g: G.state }); } catch (e) {}
+}
+function netTick() {
+  const now = performance.now();
+  for (const ph of NET.phones.slice()) {
+    if (ph.open && now - ph.last > 4000) { try { ph.conn.close(); } catch (e) {} ph.drop(); continue; }
+    if (ph.open) sendAssign(ph, false);
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -848,14 +959,15 @@ function frameLogic(rdt) {
   switch (G.state) {
     case 'lobby': {
       // remove disconnected pads
-      for (let i = 0; i < 4; i++) { const s = G.slots[i]; if (s && SRC[s.src].type === 'gp' && !SRC[s.src].connected) { G.slots[i] = null; } }
-      for (let si = 0; si < 8; si++) {
+      for (let i = 0; i < 4; i++) { const s = G.slots[i]; if (s && SRC[s.src].type !== 'kb' && !SRC[s.src].connected) { G.slots[i] = null; } }
+      for (let si = 0; si < SRC.length; si++) {
         const s = SRC[si];
         if (s.ej) {
           const slot = G.slots.findIndex(x => x && x.src === si);
           if (slot >= 0) G.lobbyHop[slot] = 1;
           else {
-            let target = si < 4 && !G.slots[si] ? si : G.slots.findIndex(x => !x);
+            const pref = si < 4 ? si : (s.type === 'ph' && s.quad ? s.seat : -1);
+            let target = pref >= 0 && !G.slots[pref] ? pref : G.slots.findIndex(x => !x);
             if (target >= 0) { G.slots[target] = { src: si, seq: G.joinSeq++ }; G.lobbyHop[target] = 1; SFX.join(target); }
           }
         }
@@ -863,7 +975,7 @@ function frameLogic(rdt) {
           const slot = G.slots.findIndex(x => x && x.src === si);
           if (slot >= 0) { G.slots[slot] = null; SFX.leave(); }
         }
-        if (s.type === 'gp' && s.est) tryStart();
+        if (s.type !== 'kb' && s.est) tryStart();
         if (s.esel) cycleCourse(1);
       }
       if (menuPress.has('Enter') || menuPress.has('Space') || menuPress.has('NumpadEnter')) tryStart();
@@ -924,7 +1036,7 @@ function frameLogic(rdt) {
   if (G.state !== 'play' && G.state !== 'countdown' && G.state !== 'roundEnd') for (const s of SRC) s.jp = false;
 }
 function tryStart() {
-  if (joinedSlots().length >= 1) { SFX.go(); startMatch(); }
+  if (G.state === 'lobby' && joinedSlots().length >= 1) { SFX.go(); startMatch(); }
 }
 function cycleCourse(d) { G.courseMode = (G.courseMode + d + COURSE_MODES.length) % COURSE_MODES.length; SFX.select(); }
 
@@ -1457,6 +1569,24 @@ function drawToast() {
 // ---------------------------------------------------------------------
 //  Lobby screen
 // ---------------------------------------------------------------------
+function drawPhonePanel() {
+  const x = 14, y = 10, box = 158;
+  if (NET.status === 'ready' && NET.qr) {
+    const n = NET.qr.length, cell = Math.floor((box - 16) / n), size = cell * n, pad = Math.floor((box - size) / 2);
+    ctx.fillStyle = '#fff'; rrect(x, y, box, box, 10); ctx.fill();
+    ctx.fillStyle = '#000';
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (NET.qr[r][c]) ctx.fillRect(x + pad + c * cell, y + pad + r * cell, cell, cell);
+    txt('📱 SCAN TO PLAY ON PHONE', x + box / 2, y + box + 13, 11, '#ffe36b');
+    const ph = NET.phones.filter(p => p.open).length;
+    txt(ph ? `Room ${NET.code} · ${ph} phone${ph > 1 ? 's' : ''} linked` : `Room ${NET.code}`, x + box / 2, y + box + 28, 10, '#fff', 'center', null, 'Verdana, sans-serif');
+    return;
+  }
+  const msg = { local: ['📱 Phone controls work when', 'the game is opened from', 'its web link (pages.dev)'],
+    nolib: ['📱 Phone controls need', 'an internet connection'],
+    connecting: ['📱 Setting up phone', 'controller link…'],
+    reconnecting: ['📱 Phone link lost,', 'reconnecting…'], off: [] }[NET.status] || [];
+  msg.forEach((m, i) => txt(m, x, y + 14 + i * 16, 11, 'rgba(255,255,255,0.75)', 'left', null, 'Verdana, sans-serif'));
+}
 function renderLobby() {
   const t = G.realT;
   drawBackground(t * 60, THEMES.meadow, t);
@@ -1503,7 +1633,7 @@ function renderLobby() {
       txt(`Press ${KB[i].joinKey} to join`, x + cw / 2, y0 + 222, 19, '#fff');
       ctx.globalAlpha = 1;
       txt(`${KB[i].label}: ${KB[i].keys}`, x + cw / 2, y0 + 252, 13, 'rgba(255,255,255,0.65)', 'center', null, 'Verdana, sans-serif');
-      txt('or press A on any gamepad', x + cw / 2, y0 + 274, 13, 'rgba(255,255,255,0.65)', 'center', null, 'Verdana, sans-serif');
+      txt('or a gamepad / phone (scan QR)', x + cw / 2, y0 + 274, 13, 'rgba(255,255,255,0.65)', 'center', null, 'Verdana, sans-serif');
     }
   }
   // course selection + start
@@ -1525,8 +1655,9 @@ function renderLobby() {
   txt(`First to ${WIN_SCORE} round wins  ·  Win a round by reaching the flag first or being the last one alive`, W / 2, 668, 14, 'rgba(255,255,255,0.85)', 'center', null, 'Verdana, sans-serif');
   txt('Backspace / B = leave   ·   M = sound   ·   F = fullscreen   ·   Esc = pause', W / 2, 694, 12, 'rgba(255,255,255,0.6)', 'center', null, 'Verdana, sans-serif');
   // gamepad status
-  const pads = SRC.slice(4).filter(s => s.connected).length;
-  txt(pads ? `🎮 ${pads} gamepad${pads > 1 ? 's' : ''} connected` : 'No gamepads detected (press a button to wake one)', 20, 20, 12, 'rgba(255,255,255,0.7)', 'left', null, 'Verdana, sans-serif');
+  const pads = SRC.slice(4, 8).filter(s => s.connected).length;
+  txt(pads ? `🎮 ${pads} gamepad${pads > 1 ? 's' : ''} connected` : 'No gamepads detected (press a button to wake one)', W - 64, 20, 12, 'rgba(255,255,255,0.7)', 'right', null, 'Verdana, sans-serif');
+  drawPhonePanel();
   drawToast();
 }
 
@@ -1553,9 +1684,11 @@ function frame(now) {
   }
   try { render(clamp(acc / STEP, 0, 1)); } catch (e) { console.error(e); }
   musicTick();
+  netTick();
   requestAnimationFrame(frame);
 }
 canvas.focus();
+netInit();
 requestAnimationFrame(frame);
 </script>
 </body>
