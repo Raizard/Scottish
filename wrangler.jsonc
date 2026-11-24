@@ -1,0 +1,8 @@
+// Cloudflare Workers (static assets) config — deploy with:  npx wrangler deploy
+{
+  "name": "crush-course",
+  "compatibility_date": "2025-06-01",
+  "assets": {
+    "directory": "."
+  }
+}

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0b0d1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Crush Course Controller</title>
+<style>
+  :root { --bg: #0b0d1a; --bar: #151a33; --zone: #1a1f3a; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: #fff; overflow: hidden; overscroll-behavior: none;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  #bar { position: fixed; top: 0; left: 0; right: 0; height: calc(44px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 8px 0;
+    display: flex; align-items: center; gap: 6px; background: var(--bar); z-index: 5; font-size: 13px; }
+  #status { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #dot { width: 10px; height: 10px; border-radius: 50%; background: #f5a623; flex: none; }
+  #dot.ok { background: #36d26a; } #dot.bad { background: #ff4d4d; }
+  .tb { border: 0; border-radius: 8px; padding: 7px 10px; background: rgba(255,255,255,.12); color: #fff; font: 700 12px inherit; font-family: inherit; }
+  .tb.sel { background: #ffd22e; color: #222; }
+  #start { background: #2fd06a; color: #062; }
+  #pad { position: fixed; top: calc(44px + env(safe-area-inset-top)); left: 0; right: 0; bottom: 0; display: grid; gap: 6px;
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); }
+  body.quad #pad { grid-template: 1fr 1fr / 1fr 1fr; }
+  @media (orientation: portrait) { body.quad #pad { grid-template: repeat(4, 1fr) / 1fr; } }
+  body.single #pad { grid-template: 1fr / 1fr; }
+  body.single .zone:not([data-z="0"]) { display: none; }
+  body.flip .zone[data-z="0"], body.flip .zone[data-z="1"] { transform: rotate(180deg); }
+  .zone { --c: #6b7290; position: relative; display: grid; grid-template-columns: 1fr 1fr 1.25fr; gap: 6px; padding: 26px 6px 6px;
+    border-radius: 16px; background: var(--zone); border: 3px solid var(--c); transition: background .2s; min-height: 0; }
+  .zone.joined { background: color-mix(in srgb, var(--c) 22%, var(--zone)); }
+  .label { position: absolute; top: 4px; left: 0; right: 0; text-align: center; font-weight: 900; font-size: 13px; letter-spacing: .5px; color: var(--c); pointer-events: none; }
+  .btn { display: flex; align-items: center; justify-content: center; border-radius: 12px; background: rgba(255,255,255,.1);
+    font-weight: 900; font-size: clamp(16px, 6vmin, 44px); color: #fff; border: 2px solid rgba(255,255,255,.15); min-height: 0; }
+  .btn.j { background: color-mix(in srgb, var(--c) 45%, transparent); font-size: clamp(14px, 4.5vmin, 34px); }
+  .btn.on { background: rgba(255,255,255,.55); color: #111; transform: scale(.96); }
+  body.single .zone { grid-template-columns: 1fr 1fr 1.6fr; gap: 12px; padding: 34px 12px 12px; }
+  body.single .label { font-size: 18px; top: 8px; }
+  #join { position: fixed; inset: 0; background: var(--bg); display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px; z-index: 10; padding: 20px; text-align: center; }
+  #join input { font-size: 28px; width: 7em; text-align: center; text-transform: uppercase; letter-spacing: 4px; padding: 8px; border-radius: 10px; border: 2px solid #555; background: #111; color: #fff; }
+  #join button { font-size: 20px; padding: 10px 26px; border-radius: 10px; border: 0; background: #ffd22e; font-weight: 900; }
+  #rot { display: none; }
+</style>
+</head>
+<body class="quad">
+<div id="bar">
+  <div id="status"><span id="dot"></span><span id="stext">Starting…</span></div>
+  <button class="tb sel" id="mQuad">4P</button>
+  <button class="tb" id="mSingle">1P</button>
+  <button class="tb" id="flip" title="Rotate the top two zones so players across the table can use them">⇅</button>
+  <button class="tb" id="start">START</button>
+  <button class="tb" id="fs" title="Fullscreen">⛶</button>
+</div>
+<div id="pad"></div>
+<div id="join">
+  <h2 style="margin:0">Crush Course controller</h2>
+  <div>Enter the room code shown under the QR code on the game screen:</div>
+  <input id="code" maxlength="5" autocomplete="off" autocapitalize="characters">
+  <button id="go">Connect</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+'use strict';
+const COLORS = [
+  { name: 'BLUE', c: '#3b8bff' }, { name: 'RED', c: '#ff4d4d' }, { name: 'GREEN', c: '#2fd06a' }, { name: 'YELLOW', c: '#ffd22e' },
+];
+const L = 1, R = 2, J = 4;
+const pad = document.getElementById('pad');
+const zones = [];
+for (let z = 0; z < 4; z++) {
+  const el = document.createElement('div');
+  el.className = 'zone'; el.dataset.z = z;
+  el.innerHTML = `<div class="label">TAP JUMP TO JOIN</div>
+    <div class="btn" data-z="${z}" data-b="${L}">◀</div>
+    <div class="btn" data-z="${z}" data-b="${R}">▶</div>
+    <div class="btn j" data-z="${z}" data-b="${J}">JUMP</div>`;
+  pad.appendChild(el);
+  zones.push({ el, label: el.querySelector('.label'), btns: [...el.querySelectorAll('.btn')] });
+}
+
+// ---------- state ----------
+let mode = 'quad', state = [0, 0, 0, 0], assign = [-1, -1, -1, -1], gameState = '';
+let conn = null, peer = null, connected = false, stId = 0, startPending = false;
+const q = new URLSearchParams(location.search);
+let room = (location.hash.slice(1) || q.get('room') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+function setStatus(t, cls) {
+  document.getElementById('stext').textContent = t;
+  document.getElementById('dot').className = cls || '';
+}
+function renderZones() {
+  zones.forEach((z, i) => {
+    const slot = assign[i];
+    if (slot >= 0) {
+      z.el.style.setProperty('--c', COLORS[slot].c); z.el.classList.add('joined');
+      z.label.textContent = `P${slot + 1} ${COLORS[slot].name}`;
+    } else {
+      z.el.style.setProperty('--c', mode === 'quad' ? COLORS[i].c + '88' : '#6b7290'); z.el.classList.remove('joined');
+      z.label.textContent = gameState && gameState !== 'lobby' ? 'JOIN IN THE LOBBY' : 'TAP JUMP TO JOIN';
+    }
+    z.btns.forEach(b => b.classList.toggle('on', !!(state[i] & +b.dataset.b)));
+  });
+}
+
+// ---------- multi-touch: every finger is re-checked against the button under it ----------
+const fingers = new Map();
+function btnAt(x, y) { const el = document.elementFromPoint(x, y); return el && el.closest ? el.closest('.btn[data-b]') : null; }
+function recompute() {
+  const next = [0, 0, 0, 0];
+  for (const el of fingers.values()) if (el) next[+el.dataset.z] |= +el.dataset.b;
+  const jumped = next.some((v, i) => (v & J) && !(state[i] & J));
+  const changed = next.some((v, i) => v !== state[i]);
+  state = next;
+  if (changed) { send(); renderZones(); if (jumped && navigator.vibrate) navigator.vibrate(12); }
+}
+pad.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  if (e.target.hasPointerCapture && e.target.hasPointerCapture(e.pointerId)) e.target.releasePointerCapture(e.pointerId);
+  fingers.set(e.pointerId, btnAt(e.clientX, e.clientY)); recompute(); keepAwake();
+});
+pad.addEventListener('pointermove', e => { if (fingers.has(e.pointerId)) { fingers.set(e.pointerId, btnAt(e.clientX, e.clientY)); recompute(); } });
+for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) pad.addEventListener(ev, e => { if (ev === 'lostpointercapture') return; fingers.delete(e.pointerId); recompute(); });
+document.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+window.addEventListener('blur', () => { fingers.clear(); recompute(); });
+
+// ---------- toolbar ----------
+function setMode(m) {
+  mode = m; document.body.className = m + (document.body.classList.contains('flip') ? ' flip' : '');
+  document.getElementById('mQuad').classList.toggle('sel', m === 'quad');
+  document.getElementById('mSingle').classList.toggle('sel', m === 'single');
+  document.getElementById('flip').style.display = m === 'quad' ? '' : 'none';
+  fingers.clear(); state = [0, 0, 0, 0];
+  try { localStorage.setItem('cc-mode', m); } catch (e) {}
+  send(); renderZones();
+}
+document.getElementById('mQuad').onclick = () => setMode('quad');
+document.getElementById('mSingle').onclick = () => setMode('single');
+document.getElementById('flip').onclick = e => { document.body.classList.toggle('flip'); e.currentTarget.classList.toggle('sel'); };
+document.getElementById('start').onclick = () => { stId++; startPending = true; send(); if (navigator.vibrate) navigator.vibrate(20); };
+document.getElementById('fs').onclick = () => {
+  const d = document.documentElement;
+  if (!document.fullscreenElement) (d.requestFullscreen || d.webkitRequestFullscreen || (() => {})).call(d);
+  else document.exitFullscreen && document.exitFullscreen();
+};
+if (!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen)) document.getElementById('fs').style.display = 'none';
+let wake = null;
+async function keepAwake() { try { if (!wake && navigator.wakeLock) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => wake = null); } } catch (e) {} }
+
+// ---------- networking ----------
+function send() {
+  if (!conn || !connected) return;
+  const msg = { t: 's', b: state, m: mode };
+  if (startPending) { msg.st = 1; msg.stId = stId; startPending = false; }
+  try { conn.send(msg); } catch (e) {}
+}
+setInterval(send, 250); // heartbeat so the game knows we're still here
+
+function peerOptions() {
+  const o = { config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] } };
+  if (q.get('peerhost')) { o.host = q.get('peerhost'); o.port = +q.get('peerport') || 9000; o.path = q.get('peerpath') || '/'; o.secure = q.get('peersecure') === '1'; }
+  return o;
+}
+let retryTimer = null;
+function retry(ms) { clearTimeout(retryTimer); retryTimer = setTimeout(connect, ms); }
+function connect() {
+  if (!peer || peer.destroyed) return startPeer();
+  if (peer.disconnected) { peer.reconnect(); return retry(2500); }
+  setStatus(`Connecting to room ${room}…`);
+  if (conn) { try { conn.close(); } catch (e) {} }
+  const c = peer.connect('crushcourse-' + room.toLowerCase(), { reliable: true, serialization: 'json' });
+  conn = c;
+  const t = setTimeout(() => { if (conn === c && !connected) { setStatus('Still connecting… are you on the same Wi-Fi?', 'bad'); retry(500); } }, 12000);
+  c.on('open', () => { clearTimeout(t); connected = true; setStatus(`Room ${room}`, 'ok'); send(); });
+  c.on('data', msg => { if (msg && msg.t === 'a') { assign = msg.s; gameState = msg.g; renderZones(); } });
+  c.on('close', () => { if (conn !== c) return; connected = false; assign = [-1, -1, -1, -1]; renderZones(); setStatus('Disconnected — reconnecting…', 'bad'); retry(2000); });
+  c.on('error', () => {});
+}
+function startPeer() {
+  if (!window.Peer) { setStatus('Could not load (check internet)', 'bad'); return; }
+  setStatus('Starting…');
+  peer = new Peer(peerOptions());
+  peer.on('open', connect);
+  peer.on('error', err => {
+    if (err.type === 'peer-unavailable') { setStatus(`Game ${room} not found — is the game open?`, 'bad'); retry(3000); }
+    else if (['network', 'server-error', 'socket-error', 'socket-closed', 'disconnected'].includes(err.type)) { setStatus('Network problem — retrying…', 'bad'); retry(3000); }
+    else setStatus('Error: ' + err.type, 'bad');
+  });
+  peer.on('disconnected', () => { if (!peer.destroyed) setTimeout(() => peer.disconnected && peer.reconnect(), 1500); });
+}
+
+// ---------- boot ----------
+try { const m = localStorage.getItem('cc-mode'); if (m === 'single') setMode('single'); } catch (e) {}
+renderZones();
+if (room.length === 5) startPeer();
+else {
+  const j = document.getElementById('join'); j.style.display = 'flex';
+  document.getElementById('go').onclick = () => {
+    const v = document.getElementById('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (v.length !== 5) return;
+    room = v; location.hash = v; j.style.display = 'none'; startPeer();
+  };
+}
+</script>
+</body>
+</html>
