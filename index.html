@@ -690,9 +690,9 @@ const solidAt = (c, r) => SOLID[tileAt(c, r)] === 1;
 const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 const isActive = p => p.alive && !p.finished;
 
-function overlapsSolid(p) {
-  const c0 = Math.floor((p.x + 1) / TS), c1 = Math.floor((p.x + p.w - 1) / TS);
-  const r0 = Math.floor((p.y + 1) / TS), r1 = Math.floor((p.y + p.h - 1) / TS);
+function overlapsSolid(p, e = 1) {
+  const c0 = Math.floor((p.x + e) / TS), c1 = Math.floor((p.x + p.w - e) / TS);
+  const r0 = Math.floor((p.y + e) / TS), r1 = Math.floor((p.y + p.h - e) / TS);
   for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) if (solidAt(c, r)) return true;
   return false;
 }
@@ -703,7 +703,7 @@ function overlapsSolid(p) {
 function moveX(p, dx, depth = 0) {
   if (!dx) return;
   p.x += dx;
-  const r0 = Math.floor(p.y / TS), r1 = Math.floor((p.y + p.h - 0.01) / TS);
+  const r0 = Math.floor((p.y + 2) / TS), r1 = Math.floor((p.y + p.h - 2) / TS);
   if (dx > 0) {
     const c = Math.floor((p.x + p.w) / TS);
     for (let r = r0; r <= r1; r++) if (solidAt(c, r)) { p.x = c * TS - p.w - 0.001; if (p.vx > 0) p.vx = 0; break; }
@@ -713,8 +713,8 @@ function moveX(p, dx, depth = 0) {
   }
   for (const s of G.level.crushers) {
     if (!overlaps(p, s)) continue;
-    if (p.y + p.h - s.y < 6) continue; // let vertical resolution handle edges
-    if (dx > 0) { p.x = s.x - p.w - 0.001; if (p.vx > 0) p.vx = 0; } else { p.x = s.x + s.w + 0.001; if (p.vx < 0) p.vx = 0; }
+    if (p.y + p.h - s.y < 6 || s.y + s.h - p.y < 6) continue; // top/bottom contacts are vertical, handled in moveY
+    if (p.x + p.w / 2 < s.x + s.w / 2) { p.x = s.x - p.w - 0.001; if (p.vx > 0) p.vx = 0; } else { p.x = s.x + s.w + 0.001; if (p.vx < 0) p.vx = 0; }
   }
   if (depth < 3) for (const q of G.players) {
     if (q === p || !isActive(q) || !overlaps(p, q)) continue;
@@ -727,7 +727,10 @@ function moveX(p, dx, depth = 0) {
     if (dx > 0) p.x = Math.min(p.x, q.x - p.w - 0.001); else p.x = Math.max(p.x, q.x + q.w + 0.001);
     // shoulder-bump: a fast charge knocks the other player away
     if (depth === 0 && q.bumpCd <= 0 && Math.abs(p.vx) > 200 && (p.vx - q.vx) * Math.sign(dx) > 230) {
-      q.vx = p.vx * 1.05; q.knock = 0.22; p.vx *= 0.3; q.bumpCd = 0.35; p.bumpCd = 0.2;
+      if (q.vx * Math.sign(dx) < -200) { // both charging at each other: both get knocked back
+        const pv = p.vx; p.vx = q.vx * 0.9; q.vx = pv * 0.9; p.knock = q.knock = 0.22;
+      } else { q.vx = p.vx * 1.05; q.knock = 0.22; p.vx *= 0.3; }
+      q.bumpCd = 0.35; p.bumpCd = 0.35;
       q.qx = 0.75; q.qy = 1.2; G.shake = Math.max(G.shake, 3);
       SFX.bump();
       spawnBurst(q.x + (dx > 0 ? 0 : q.w), q.y + q.h * 0.5, 6, '#ffffff', 160, 0.25, 3);
@@ -759,7 +762,7 @@ function moveY(p, dy) {
     if (hit) {
       p.y = r * TS - p.h;
       if (spring >= 0) {
-        p.vy = -PHYS.spring; p.jumping = false; p.qx = 0.7; p.qy = 1.35;
+        p.vy = -PHYS.spring; p.jumping = false; p.qx = 0.7; p.qy = 1.35; p.coyote = 0; p.buffer = 0;
         G.level.springAnim.set(spring * ROWS + r, 0.35);
         SFX.spring(); spawnBurst(p.x + p.w / 2, p.y + p.h, 6, '#ffffff', 120, 0.3, 3);
       } else {
@@ -775,7 +778,11 @@ function moveY(p, dy) {
   for (const s of L.crushers) {
     if (!overlaps(p, s)) continue;
     if (p.y + p.h / 2 < s.y + s.h / 2) { p.y = s.y - p.h; if (p.vy >= 0) land(p, s); }
-    else if (s.state !== 'slam') { p.y = s.y + s.h; if (p.vy < 0) p.vy = 0; }
+    else if (s.state !== 'slam') {
+      const oy = p.y; p.y = s.y + s.h;
+      if (overlapsSolid(p)) { p.y = oy; p.x = p.x + p.w / 2 < s.x + s.w / 2 ? s.x - p.w - 0.001 : s.x + s.w + 0.001; }
+      else if (p.vy < 0) p.vy = 0;
+    }
   }
   if (p.vy >= 0) for (const m of L.movers) {
     if (p.x + p.w <= m.x + 2 || p.x >= m.x + m.w - 2) continue;
@@ -785,15 +792,18 @@ function moveY(p, dy) {
   for (const q of G.players) {
     if (q === p || !isActive(q) || !overlaps(p, q)) continue;
     if (p.y + p.h / 2 < q.y + q.h / 2) {
-      p.y = q.y - p.h;
+      const oy = p.y; p.y = q.y - p.h;
+      if (overlapsSolid(p, 0.05)) { p.y = oy; continue; }       // no room above (ceiling): leave it
       if (p.vy >= 0) land(p, q);
     } else if (p.vy < 0) {
       // jumping into someone above launches them upward
-      p.y = q.y + q.h;
-      if (q.vy > p.vy - 50) { q.vy = p.vy - 70; q.onGround = false; q.ground = null; q.jumping = false; q.qx = 0.8; q.qy = 1.2; }
+      const oy = p.y; p.y = q.y + q.h;
+      if (overlapsSolid(p, 0.05)) { p.y = oy; const qy = q.y; q.y = p.y - q.h; if (overlapsSolid(q, 0.05)) q.y = qy; }
+      if (q.vy > p.vy - 50) { q.vy = p.vy - 70; q.onGround = false; q.ground = null; q.jumping = false; q.coyote = 0; q.qx = 0.8; q.qy = 1.2; }
       p.vy *= 0.85;
     } else {
-      q.y = p.y - q.h;
+      const qy = q.y; q.y = p.y - q.h;
+      if (overlapsSolid(q, 0.05)) { q.y = qy; const oy = p.y; p.y = q.y + q.h; if (overlapsSolid(p, 0.05)) p.y = oy; continue; }
       if (q.vy > 0) land(q, p);
     }
   }
@@ -938,6 +948,7 @@ function updatePlayer(p, dt) {
   p.qx += (1 - p.qx) * Math.min(1, dt * 14); p.qy += (1 - p.qy) * Math.min(1, dt * 14);
   p.blink -= dt; if (p.blink < -0.12) p.blink = 2 + Math.random() * 3;
   if (p.knock > 0) p.knock -= dt;
+  if (p.carryT > 0) p.carryT = p.onGround ? 0 : p.carryT - dt;
   if (p.bumpCd > 0) p.bumpCd -= dt;
   const sx = p.x;
 
@@ -967,7 +978,7 @@ function updatePlayer(p, dt) {
   const target = dir * PHYS.maxRun;
   let a;
   if (p.onGround) a = dir === 0 ? PHYS.decG : (p.vx !== 0 && Math.sign(p.vx) !== dir ? PHYS.turnG : PHYS.accG);
-  else a = dir === 0 ? PHYS.decA : (p.vx !== 0 && Math.sign(p.vx) !== dir ? PHYS.accA * 1.3 : PHYS.accA);
+  else a = dir === 0 ? (p.carryT > 0 ? 0 : PHYS.decA) : (p.vx !== 0 && Math.sign(p.vx) !== dir ? PHYS.accA * 1.3 : PHYS.accA);
   if (p.knock > 0) a *= 0.15;
   p.vx = approach(p.vx, target, a * dt);
   if (dir) p.face = dir;
@@ -979,7 +990,7 @@ function updatePlayer(p, dt) {
     p.vy = -PHYS.jumpV; p.jumping = true; p.jumpCut = false;
     p.buffer = 0; p.coyote = 0;
     if (g && g !== 'tile' && g.id !== undefined) { g.vy = Math.max(g.vy, 120); g.qx = 1.25; g.qy = 0.75; } // jumping off a head squashes it
-    if (g && g.dx) p.vx += g.dx / dt * 0.5;
+    if (g && g.dx) { p.vx += g.dx / dt; p.carryT = 0.45; } // keep the platform's momentum
     p.onGround = false; p.ground = null;
     p.qx = 0.7; p.qy = 1.3;
     spawnDust(p.x + p.w / 2, p.y + p.h, 4);
@@ -1039,7 +1050,7 @@ function checkRoundEnd() {
   const alive = G.players.filter(isActive);
   if (G.players.length > 1) {
     if (alive.length === 1) endRound(alive[0].id, 'is the last one standing!');
-    else if (alive.length === 0) endRound(-1, 'Everyone got blocked out!');
+    else if (alive.length === 0) endRound(-1, 'Nobody survived!');
   } else if (alive.length === 0) endRound(-1, 'Practice run over — try again!');
 }
 function quitToLobby() {
