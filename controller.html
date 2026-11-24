@@ -36,6 +36,9 @@
   .pick span { display: block; font-size: 12px; opacity: .8; margin-top: 3px; min-height: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pick.taken { opacity: .38; }
   .pick.me { box-shadow: 0 0 0 3px #fff inset; }
+  #joinBtn { width: 100%; margin: 2px 0 18px; padding: 16px; border: 0; border-radius: 14px; font: 900 22px system-ui, sans-serif;
+    background: var(--jc, #ffd22e); color: #111; box-shadow: 0 4px 0 rgba(0,0,0,.35); }
+  #joinBtn:disabled { background: #3a4170; color: #aab; box-shadow: none; }
   #msg { margin-top: 14px; min-height: 20px; font-size: 14px; color: #ffd27d; text-align: center; }
   #back { margin-top: 10px; width: 100%; padding: 12px; font-size: 16px; display: none; }
 
@@ -66,7 +69,8 @@
   <h2>Your name</h2>
   <input id="name" maxlength="12" placeholder="Type your name" autocomplete="nickname" enterkeyhint="done">
   <div class="hint">Shown above your character in the game. Saved on this phone.</div>
-  <h2>Pick your player</h2>
+  <button id="joinBtn" disabled>Connecting…</button>
+  <h2>Or pick a colour</h2>
   <div id="picks"></div>
   <div id="msg"></div>
   <button class="tb" id="back">Back to controller</button>
@@ -115,6 +119,16 @@ function show(which) {
   bits = 0; fingers.clear(); paintButtons();
   render();
 }
+const pickBtns = COLORS.map((c, i) => {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'pick'; b.style.setProperty('--pc', c.c);
+  const sw = document.createElement('div'); sw.className = 'sw';
+  const t = document.createElement('b'); t.textContent = `P${i + 1} ${c.name}`;
+  b.append(sw, t, document.createElement('span'));
+  b.addEventListener('click', () => pick(i));
+  $('picks').appendChild(b);
+  return b;
+});
 function myName() { return (lobby.my >= 0 && lobby.slots[lobby.my] && lobby.slots[lobby.my].n) || ''; }
 function render() {
   const my = lobby.my, inLobby = lobby.g === 'lobby';
@@ -124,28 +138,40 @@ function render() {
     else setStatus(`Room ${room}`, 'ok');
   }
   $('change').style.display = screen === 'ctl' && inLobby ? '' : 'none';
+  $('start').style.display = screen === 'ctl' && my >= 0 ? '' : 'none'; // START only once you have a player
+  // big JOIN button: your last colour if it's free, otherwise the first free one
+  const free = i => lobby.slots[i] && !lobby.slots[i].t;
+  const jb = $('joinBtn');
+  let target = lastSlot >= 0 && free(lastSlot) ? lastSlot : [0, 1, 2, 3].find(free);
+  if (!connected || !gotLobby) { jb.disabled = true; jb.textContent = connected ? 'Loading…' : 'Connecting…'; jb.style.removeProperty('--jc'); }
+  else if (my >= 0) { jb.disabled = false; jb.textContent = `▶ BACK TO CONTROLLER (${COLORS[my].name})`; jb.style.setProperty('--jc', COLORS[my].c); target = my; }
+  else if (!inLobby) { jb.disabled = true; jb.textContent = 'Match running — wait for the lobby'; jb.style.removeProperty('--jc'); }
+  else if (target === undefined) { jb.disabled = true; jb.textContent = 'All 4 players taken'; jb.style.removeProperty('--jc'); }
+  else { jb.disabled = false; jb.textContent = `JOIN AS ${COLORS[target].name}`; jb.style.setProperty('--jc', COLORS[target].c); }
+  jb.dataset.slot = target === undefined ? '' : target;
   $('back').style.display = screen === 'setup' && my >= 0 ? 'block' : 'none';
   // player picker
-  const box = $('picks'); box.textContent = '';
+  // colour tiles are updated in place (never rebuilt) so a tap can't land on a replaced button
   COLORS.forEach((c, i) => {
     const s = lobby.slots[i] || { t: false, n: c.name, me: false };
-    const b = document.createElement('button');
+    const b = pickBtns[i];
     b.className = 'pick' + (s.me ? ' me' : s.t ? ' taken' : '');
-    b.style.setProperty('--pc', c.c);
-    const sw = document.createElement('div'); sw.className = 'sw';
-    const t = document.createElement('b'); t.textContent = `P${i + 1} ${c.name}`;
-    const sub = document.createElement('span');
-    sub.textContent = s.me ? 'You ✓' : s.t ? `Taken by ${s.n}` : (inLobby || !connected ? 'Free · tap to play' : 'Free');
-    b.append(sw, t, sub);
-    b.disabled = s.t && !s.me;
-    b.onclick = () => pick(i);
-    box.appendChild(b);
+    b.querySelector('span').textContent = s.me ? 'You ✓' : s.t ? `Taken by ${s.n}` : 'Free · tap to play';
+    b.disabled = !!(s.t && !s.me);
   });
   const RUN = 'A match is running. You can join when the game returns to the lobby.';
   if (connected && gotLobby && !inLobby && my < 0) $('msg').textContent = RUN;
   else if (inLobby && $('msg').textContent === RUN) $('msg').textContent = '';
 }
+$('joinBtn').addEventListener('click', () => {
+  const v = $('joinBtn').dataset.slot;
+  if (v === '') return;
+  if (lobby.my >= 0 && +v === lobby.my) { saveName(); show('ctl'); return; }
+  pick(+v);
+});
+function saveName() { const n = $('name').value.replace(/\s+/g, ' ').trim().slice(0, 12); store.set('cc-name', n); return n; }
 function pick(i) {
+  if (lobby.my === i) { const n = saveName(); sendMsg({ t: 'pick', slot: i, name: n }); show('ctl'); return; }
   const name = $('name').value.replace(/\s+/g, ' ').trim().slice(0, 12);
   store.set('cc-name', name);
   $('name').blur();

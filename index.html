@@ -364,6 +364,7 @@ function pickSlot(ph, slot, name) {
 }
 function say(ph, text) { try { ph.conn.send({ t: 'msg', text }); } catch (e) {} }
 function sendLobby(ph, force) {
+  if (!ph.open) { ph.sent = ''; return; } // netTick sends it once the channel is open
   const my = ownSlot(ph.si);
   const obj = { t: 'l', g: G.state, my, slots: G.slots.map((x, i) => ({ t: !!x, n: displayName(i), me: i === my })) };
   const j = JSON.stringify(obj);
@@ -1102,7 +1103,9 @@ function frameLogic(rdt) {
           const slot = G.slots.findIndex(x => x && x.src === si);
           if (slot >= 0) { G.slots[slot] = null; SFX.leave(); }
         }
-        if (s.type !== 'kb' && s.est) tryStart();
+        // a phone's START only counts once that phone has picked a player
+        if (s.type === 'gp' && s.est) tryStart();
+        if (s.type === 'ph' && s.est && ownSlot(si) >= 0) tryStart();
         if (s.esel) cycleCourse(1);
       }
       if (menuPress.has('Enter') || menuPress.has('Space') || menuPress.has('NumpadEnter')) tryStart();
