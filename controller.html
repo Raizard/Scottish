@@ -67,7 +67,7 @@
 
 <div class="screen" id="setup">
   <h2>Your name</h2>
-  <input id="name" maxlength="12" placeholder="Type your name" autocomplete="nickname" enterkeyhint="done">
+  <input id="name" maxlength="20" placeholder="Type your name" autocomplete="nickname" enterkeyhint="done">
   <div class="hint">Shown above your character in the game. Saved on this phone.</div>
   <button id="joinBtn" disabled>Connecting…</button>
   <h2>Or pick a colour</h2>
@@ -105,6 +105,7 @@ if (!pid) { pid = Math.random().toString(36).slice(2) + Date.now().toString(36);
 $('name').value = store.get('cc-name', '');
 
 // ---------- state from the game ----------
+let pendingPick = -1, lastRx = 0;
 let lobby = { g: '', my: -1, slots: [] }, gotLobby = false, wantCtl = false, autoPicked = false, screen = '';
 let lastSlot = -1; try { lastSlot = +(sessionStorage.getItem('cc-slot') ?? -1); } catch (e) {}
 let bits = 0, conn = null, peer = null, connected = false, stId = 0, startPending = false;
@@ -145,6 +146,8 @@ function render() {
   let target = lastSlot >= 0 && free(lastSlot) ? lastSlot : [0, 1, 2, 3].find(free);
   if (!connected || !gotLobby) { jb.disabled = true; jb.textContent = connected ? 'Loading…' : 'Connecting…'; jb.style.removeProperty('--jc'); }
   else if (my >= 0) { jb.disabled = false; jb.textContent = `▶ BACK TO CONTROLLER (${COLORS[my].name})`; jb.style.setProperty('--jc', COLORS[my].c); target = my; }
+  else if (!inLobby && pendingPick >= 0) { jb.disabled = true; jb.textContent = `Joining as ${COLORS[pendingPick].name} after this match…`; jb.style.setProperty('--jc', COLORS[pendingPick].c); }
+  else if (!inLobby && target !== undefined) { jb.disabled = false; jb.textContent = 'JOIN NEXT MATCH'; jb.style.setProperty('--jc', COLORS[target].c); }
   else if (!inLobby) { jb.disabled = true; jb.textContent = 'Match running — wait for the lobby'; jb.style.removeProperty('--jc'); }
   else if (target === undefined) { jb.disabled = true; jb.textContent = 'All 4 players taken'; jb.style.removeProperty('--jc'); }
   else { jb.disabled = false; jb.textContent = `JOIN AS ${COLORS[target].name}`; jb.style.setProperty('--jc', COLORS[target].c); }
@@ -156,26 +159,27 @@ function render() {
     const s = lobby.slots[i] || { t: false, n: c.name, me: false };
     const b = pickBtns[i];
     b.className = 'pick' + (s.me ? ' me' : s.t ? ' taken' : '');
-    b.querySelector('span').textContent = s.me ? 'You ✓' : s.t ? `Taken by ${s.n}` : 'Free · tap to play';
+    b.querySelector('span').textContent = s.me ? 'You ✓' : s.t ? `Taken by ${s.n}` : pendingPick === i ? 'Joining after this match' : (inLobby || !gotLobby) ? 'Free · tap to play' : 'Free · next match';
     b.disabled = !!(s.t && !s.me);
   });
-  const RUN = 'A match is running. You can join when the game returns to the lobby.';
-  if (connected && gotLobby && !inLobby && my < 0) $('msg').textContent = RUN;
-  else if (inLobby && $('msg').textContent === RUN) $('msg').textContent = '';
+
 }
 $('joinBtn').addEventListener('click', () => {
   const v = $('joinBtn').dataset.slot;
   if (v === '') return;
+  if (lobby.g !== 'lobby' && lobby.my < 0) { pick(+v); return; }
   if (lobby.my >= 0 && +v === lobby.my) { saveName(); show('ctl'); return; }
   pick(+v);
 });
-function saveName() { const n = $('name').value.replace(/\s+/g, ' ').trim().slice(0, 12); store.set('cc-name', n); return n; }
+function cleanName(v) { return [...String(v || '').replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim()].slice(0, 12).join('').trim(); }
+function saveName() { const n = cleanName($('name').value); $('name').value = n; store.set('cc-name', n); return n; }
 function pick(i) {
   if (lobby.my === i) { const n = saveName(); sendMsg({ t: 'pick', slot: i, name: n }); show('ctl'); return; }
-  const name = $('name').value.replace(/\s+/g, ' ').trim().slice(0, 12);
-  store.set('cc-name', name);
+  const name = saveName();
   $('name').blur();
   if (!connected) { $('msg').textContent = 'Not connected yet…'; return; }
+  // 9: tapped during a match -> join automatically when the lobby comes back
+  if (gotLobby && lobby.g !== 'lobby') { pendingPick = i; $('msg').textContent = `You'll join as ${COLORS[i].name} when this match ends.`; render(); return; }
   $('msg').textContent = '';
   wantCtl = true;
   try { sessionStorage.setItem('cc-slot', i); } catch (e) {}
@@ -184,8 +188,7 @@ function pick(i) {
 }
 $('name').addEventListener('keydown', e => { if (e.key === 'Enter') $('name').blur(); });
 $('name').addEventListener('change', () => {
-  const name = $('name').value.replace(/\s+/g, ' ').trim().slice(0, 12);
-  store.set('cc-name', name);
+  const name = saveName();
   if (lobby.my >= 0) sendMsg({ t: 'pick', slot: lobby.my, name }); // rename while keeping the player
 });
 $('change').onclick = () => show('setup');
@@ -208,11 +211,14 @@ ctlEl.addEventListener('pointerdown', e => {
   if (e.target.hasPointerCapture && e.target.hasPointerCapture(e.pointerId)) e.target.releasePointerCapture(e.pointerId);
   fingers.set(e.pointerId, btnAt(e.clientX, e.clientY)); recompute(); keepAwake();
 });
-ctlEl.addEventListener('pointermove', e => { if (fingers.has(e.pointerId)) { fingers.set(e.pointerId, btnAt(e.clientX, e.clientY)); recompute(); } });
-for (const ev of ['pointerup', 'pointercancel']) ctlEl.addEventListener(ev, e => { fingers.delete(e.pointerId); recompute(); });
+window.addEventListener('pointermove', e => { if (fingers.has(e.pointerId)) { fingers.set(e.pointerId, btnAt(e.clientX, e.clientY)); recompute(); } });
+for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, e => { if (fingers.delete(e.pointerId)) recompute(); });
 ctlEl.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 document.addEventListener('contextmenu', e => e.preventDefault());
 window.addEventListener('blur', () => { fingers.clear(); recompute(); });
+function releaseAll() { fingers.clear(); bits = 0; paintButtons(); sendMsg({ t: 's', b: 0 }); }
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
+window.addEventListener('pagehide', () => { releaseAll(); try { conn && conn.close(); } catch (e) {} });
 
 $('start').onclick = () => { stId++; startPending = true; send(); if (navigator.vibrate) navigator.vibrate(20); };
 $('fs').onclick = () => {
@@ -232,12 +238,27 @@ function send() {
   sendMsg(m);
 }
 setInterval(send, 250); // heartbeat so the game knows we're still here
+setInterval(() => { // the game pings every second; 4s of silence means it was closed or reloaded
+  if (connected && performance.now() - lastRx > 4000) {
+    connected = false; gotLobby = false; render();
+    setStatus('Lost the game — reconnecting… (rescan the QR if this keeps up)', 'bad');
+    try { conn && conn.close(); } catch (e) {}
+    retry(500);
+  }
+}, 1000);
 
 function onLobby(m) {
+  if (m.g === 'lobby' && lobby.g && lobby.g !== 'lobby') $('msg').textContent = ''; // back in the lobby: clear old notices
   lobby = m;
   const firstLobby = !gotLobby; gotLobby = true;
   if (m.my >= 0 && (wantCtl || firstLobby || screen !== 'setup')) { wantCtl = false; if (screen !== 'ctl') show('ctl'); }
   else if (m.my < 0 && screen === 'ctl') show('setup');
+  if (m.my >= 0 && m.g !== 'lobby' && screen === 'setup') show('ctl');
+  if (m.g === 'lobby' && pendingPick >= 0 && m.my < 0) {
+    const want = m.slots[pendingPick] && !m.slots[pendingPick].t ? pendingPick : [0, 1, 2, 3].find(i => m.slots[i] && !m.slots[i].t);
+    pendingPick = -1;
+    if (want !== undefined) { lobby = m; pick(want); }
+  }
   // after a reload/reconnect in the lobby, grab the same player again if it's still free
   if (!autoPicked && m.my < 0 && m.g === 'lobby' && lastSlot >= 0 && m.slots[lastSlot] && !m.slots[lastSlot].t) { autoPicked = true; pick(lastSlot); }
   autoPicked = true;
@@ -248,7 +269,7 @@ function peerOptions() {
   if (q.get('peerhost')) { o.host = q.get('peerhost'); o.port = +q.get('peerport') || 9000; o.path = q.get('peerpath') || '/'; o.secure = q.get('peersecure') === '1'; }
   return o;
 }
-let retryTimer = null;
+let retryTimer = null, notFound = 0;
 function retry(ms) { clearTimeout(retryTimer); retryTimer = setTimeout(connect, ms); }
 function connect() {
   if (!peer || peer.destroyed) return startPeer();
@@ -259,12 +280,13 @@ function connect() {
   conn = c;
   const t = setTimeout(() => { if (conn === c && !connected) { setStatus('Still connecting… same Wi-Fi as the game?', 'bad'); retry(500); } }, 12000);
   c.on('open', () => {
-    clearTimeout(t); connected = true; autoPicked = false; gotLobby = false;
+    clearTimeout(t); connected = true; autoPicked = false; gotLobby = false; lastRx = performance.now(); notFound = 0;
     sendMsg({ t: 'hello', pid, name: $('name').value.trim().slice(0, 12) });
     render();
   });
   c.on('data', m => {
     if (!m || typeof m !== 'object') return;
+    lastRx = performance.now();
     if (m.t === 'l') onLobby(m);
     else if (m.t === 'msg') { $('msg').textContent = String(m.text || ''); if (screen !== 'setup') show('setup'); }
   });
@@ -280,7 +302,12 @@ function startPeer() {
   peer = new Peer(peerOptions());
   peer.on('open', connect);
   peer.on('error', err => {
-    if (err.type === 'peer-unavailable') { connected = false; setStatus(`Game ${room} not found — is the game open?`, 'bad'); retry(3000); }
+    if (err.type === 'peer-unavailable') {
+      connected = false; notFound++;
+      setStatus(`Game ${room} not found — is the game open?`, 'bad');
+      if (notFound >= 3) { clearTimeout(retryTimer); notFound = 0; askCode(`Room ${room} wasn't found. Check the code on the game screen:`); }
+      else retry(3000);
+    }
     else if (['network', 'server-error', 'socket-error', 'socket-closed', 'disconnected'].includes(err.type)) { setStatus('Network problem — retrying…', 'bad'); retry(3000); }
     else setStatus('Error: ' + err.type, 'bad');
   });
@@ -290,14 +317,20 @@ function startPeer() {
 // ---------- boot ----------
 show('setup');
 if (room.length === 5) startPeer();
-else {
+else askCode();
+function askCode(text) {
   const j = $('join'); j.style.display = 'flex';
-  $('go').onclick = () => {
-    const v = $('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (v.length !== 5) return;
-    room = v; location.hash = v; j.style.display = 'none'; startPeer();
-  };
+  if (text) j.querySelector('div').textContent = text;
+  $('code').value = room; $('code').focus();
 }
+function submitCode() {
+  const v = $('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (v.length !== 5) return;
+  room = v; location.hash = v; $('join').style.display = 'none';
+  if (peer && !peer.destroyed && !peer.disconnected) connect(); else startPeer();
+}
+$('go').onclick = submitCode;
+$('code').addEventListener('keydown', e => { if (e.key === 'Enter') submitCode(); });
 </script>
 </body>
 </html>

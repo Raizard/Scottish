@@ -9,7 +9,7 @@
   #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
   #stage{position:relative;box-shadow:0 0 60px rgba(0,0,0,.8)}
   canvas{display:block;width:100%;height:100%;outline:none}
-  #fs{position:absolute;top:10px;right:10px;width:38px;height:38px;border-radius:8px;border:2px solid rgba(255,255,255,.35);
+  #fs{position:absolute;top:1.4%;right:0.8%;width:clamp(24px,3vw,38px);height:clamp(24px,3vw,38px);border-radius:8px;border:2px solid rgba(255,255,255,.35);
       background:rgba(10,12,24,.55);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;opacity:.7;transition:opacity .2s}
   #fs:hover{opacity:1}
   #fs svg{width:20px;height:20px}
@@ -200,7 +200,7 @@ const keys = new Set(), tapped = new Set(), menuPress = new Set();
 const BLOCK_DEFAULT = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab', 'Backspace',
   'Numpad4', 'Numpad6', 'Numpad8', 'Numpad2', 'Numpad5']);
 window.addEventListener('keydown', e => {
-  if (document.activeElement === nbIn) return;
+  if (nameBox.contains(document.activeElement)) return;
   audioInit();
   if (BLOCK_DEFAULT.has(e.code)) e.preventDefault();
   if (!e.repeat) { tapped.add(e.code); menuPress.add(e.code); }
@@ -212,7 +212,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && (G.
 
 const SRC = [];
 for (let i = 0; i < 4; i++) SRC.push({ type: 'kb', i, connected: true, l: false, r: false, j: false, pj: false, jp: false, ej: false, est: false, ebk: false, esel: false });
-for (let i = 0; i < 4; i++) SRC.push({ type: 'gp', i, connected: false, l: false, r: false, j: false, pj: false, jp: false, ej: false, est: false, pst: false, ebk: false, pbk: false, esel: false, psel: false });
+for (let i = 0; i < 4; i++) SRC.push({ type: 'gp', i, connected: false, l: false, r: false, j: false, pj: false, jp: false, ej: false, est: false, pst: false, ebk: false, pbk: false, esel: false, psel: false, elb: false, plb: false, erb: false, prb: false });
 function srcLabel(si) {
   const s = SRC[si];
   if (s.type === 'kb') return { a: KB[s.i].label, b: KB[s.i].keys };
@@ -242,11 +242,14 @@ function pollInput() {
     s.ej = j && !s.pj; s.j = j; s.pj = j; if (s.ej) s.jp = true;
     const st = b(9); s.est = st && !s.pst; s.pst = st;
     const bk = b(1); s.ebk = bk && !s.pbk; s.pbk = bk;
-    const sel = b(8) || b(4) || b(5); s.esel = sel && !s.psel; s.psel = sel;
+    const sel = b(8); s.esel = sel && !s.psel; s.psel = sel;
+    const lb = b(4); s.elb = lb && !s.plb; s.plb = lb;
+    const rb = b(5); s.erb = rb && !s.prb; s.prb = rb;
   }
   for (let i = 8; i < SRC.length; i++) {
     const s = SRC[i];
     if (!s.connected) { s.l = s.r = s.j = s.pj = false; s.ej = s.est = s.ebk = s.esel = false; s.tap = s.stTap = false; continue; }
+    if (performance.now() - (s.lastIn || 0) > 750) s.rl = s.rr = s.rj = false; // phone went quiet: let go of buttons
     s.l = s.rl; s.r = s.rr;
     s.ej = s.tap || (s.rj && !s.pj); s.tap = false;
     s.j = s.rj; s.pj = s.rj; if (s.ej) s.jp = true;
@@ -273,7 +276,9 @@ function netInit() {
 }
 function startPeer() {
   const AL = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  NET.code = Array.from({ length: 5 }, () => AL[Math.floor(Math.random() * AL.length)]).join('');
+  let saved = ''; try { saved = sessionStorage.getItem('cc-room') || ''; } catch (e) {}
+  NET.code = /^[A-Z0-9]{5}$/.test(saved) && (NET.idTries || 0) < 4 ? saved : Array.from({ length: 5 }, () => AL[Math.floor(Math.random() * AL.length)]).join('');
+  try { sessionStorage.setItem('cc-room', NET.code); } catch (e) {}
   NET.status = 'connecting';
   const peer = new Peer('crushcourse-' + NET.code.toLowerCase(), peerOptions());
   NET.peer = peer;
@@ -287,7 +292,12 @@ function startPeer() {
   peer.on('connection', setupPhone);
   peer.on('disconnected', () => { if (NET.status === 'ready') NET.status = 'reconnecting'; setTimeout(() => { if (!peer.destroyed && peer.disconnected) peer.reconnect(); }, 2000); });
   peer.on('error', err => {
-    if (err.type === 'unavailable-id') { peer.destroy(); startPeer(); return; }
+    if (err.type === 'unavailable-id') {
+      // after a reload the old id can take a moment to be released: retry it a few times, then pick a new code
+      peer.destroy(); NET.idTries = (NET.idTries || 0) + 1;
+      if (NET.idTries >= 4) { try { sessionStorage.removeItem('cc-room'); } catch (e) {} }
+      setTimeout(startPeer, NET.idTries >= 4 ? 0 : 1500); return;
+    }
     if (err.type === 'browser-incompatible') { NET.status = 'nolib'; return; }
     if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type)) {
       NET.status = 'reconnecting';
@@ -304,7 +314,7 @@ function makeQR(text) {
     return m;
   } catch (e) { return null; }
 }
-function cleanName(n) { return String(n || '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 12); }
+function cleanName(n) { return String(n || '').replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 12); }
 const ownSlot = si => G.slots.findIndex(s => s && s.src === si);
 function setupPhone(conn) {
   const src = { type: 'ph', phone: ++NET.count, connected: false, rl: false, rr: false, rj: false, tap: false, stTap: false,
@@ -342,7 +352,7 @@ function setupPhone(conn) {
       const b = msg.b | 0, j = !!(b & 4);
       if (j && !src.rj) src.tap = true;
       if (msg.st && msg.stId !== ph.stId) { src.stTap = true; ph.stId = msg.stId; }
-      src.rl = !!(b & 1); src.rr = !!(b & 2); src.rj = j;
+      src.rl = !!(b & 1); src.rr = !!(b & 2); src.rj = j; src.lastIn = performance.now();
     }
   });
   conn.on('close', drop);
@@ -352,10 +362,10 @@ function setupPhone(conn) {
 function pickSlot(ph, slot, name) {
   const src = ph.src, si = ph.si;
   if (slot < 0 || slot > 3) return;
-  if (name) src.name = name;
   const cur = ownSlot(si);
-  if (cur === slot) { G.slots[slot].name = src.name; G.lobbyHop[slot] = 1; sendLobby(ph, true); return; }
-  if (G.state !== 'lobby') return say(ph, 'A match is running. You can join when it returns to the lobby.');
+  if (cur === slot) { src.name = name; G.slots[slot].name = name; G.lobbyHop[slot] = 1; sendLobby(ph, true); return; }
+  src.name = name;
+  if (G.state !== 'lobby') return say(ph, 'A match is running. You can join when the game returns to the lobby.');
   if (G.slots[slot]) return say(ph, `${displayName(slot)} already has that player.`);
   if (cur >= 0) G.slots[cur] = null;
   G.slots[slot] = { src: si, seq: G.joinSeq++, pid: src.pid, name: src.name };
@@ -376,7 +386,8 @@ function netTick() {
   const now = performance.now();
   for (const ph of NET.phones.slice()) {
     if (ph.open && now - ph.last > 4000) { try { ph.conn.close(); } catch (e) {} ph.drop(); continue; }
-    if (ph.open) sendLobby(ph, false);
+    if (ph.open) sendLobby(ph, now - (ph.lastPing || 0) > 1000);
+    if (ph.open && now - (ph.lastPing || 0) > 1000) ph.lastPing = now;
   }
 }
 
@@ -878,7 +889,8 @@ function kill(p, reason) {
   spawnBurst(cx, cy, 26, p.color, 420, 0.9, 6);
   spawnBurst(cx, cy, 10, '#ffffff', 300, 0.5, 4);
   const px = reason === 'BLOCKED OUT!' ? G.cam.x + 150 : cx;
-  G.popups.push({ text: reason, sub: displayName(p.id), x: px, y: cy - 30, color: p.color, life: 1.6, max: 1.6 });
+  const stack = G.popups.filter(q => q.life > q.max - 0.5).length;
+  G.popups.push({ text: reason, sub: displayName(p.id), x: px, y: clamp(cy - 30, 100, H - 70) + stack * 56, color: p.color, life: 1.6, max: 1.6 });
   G.shake = Math.max(G.shake, 9);
   if (reason === 'BLOCKED OUT!') SFX.blocked(); else SFX.death();
 }
@@ -920,7 +932,9 @@ function newPlayer(slot, order) {
 
 function updatePlayer(p, dt) {
   const inp = SRC[p.src];
-  const jp = inp.jp; inp.jp = false;
+  const live = G.state === 'play' || G.state === 'roundEnd';
+  const jp = live && inp.jp;
+  if (live || G.state !== 'countdown' || G.cd > 0.3) inp.jp = false; // keep a jump pressed right before GO
   p.qx += (1 - p.qx) * Math.min(1, dt * 14); p.qy += (1 - p.qy) * Math.min(1, dt * 14);
   p.blink -= dt; if (p.blink < -0.12) p.blink = 2 + Math.random() * 3;
   if (p.knock > 0) p.knock -= dt;
@@ -989,6 +1003,7 @@ function updatePlayer(p, dt) {
 // ---------------------------------------------------------------------
 function joinedSlots() { return G.slots.map((s, i) => s ? i : -1).filter(i => i >= 0); }
 function startMatch() {
+  if (nameSlot >= 0) closeNameBox(false);
   G.scores = [0, 0, 0, 0]; G.round = 0; G.lastLevel = -1; G.matchWinner = -1;
   nextRound();
 }
@@ -1017,7 +1032,7 @@ function endRound(w, reason) {
   G.roundOver = true; G.winner = w; G.reason = reason;
   if (w >= 0) { G.scores[w]++; SFX.win(); } else SFX.draw();
   if (w >= 0 && G.scores[w] >= WIN_SCORE) G.matchWinner = w;
-  G.state = 'roundEnd'; G.endT = 0; G.timeScale = 0.35;
+  G.state = 'roundEnd'; G.endT = 0; G.timeScale = 0.35; G.goT = 0;
 }
 function checkRoundEnd() {
   if (G.roundOver) return;
@@ -1106,7 +1121,8 @@ function frameLogic(rdt) {
         // a phone's START only counts once that phone has picked a player
         if (s.type === 'gp' && s.est) tryStart();
         if (s.type === 'ph' && s.est && ownSlot(si) >= 0) tryStart();
-        if (s.esel) cycleCourse(1);
+        if (s.esel || s.erb) cycleCourse(1);
+        if (s.elb) cycleCourse(-1);
       }
       if (menuPress.has('Enter') || menuPress.has('Space') || menuPress.has('NumpadEnter')) tryStart();
       if (menuPress.has('Backspace') || menuPress.has('Delete')) {
@@ -1120,7 +1136,8 @@ function frameLogic(rdt) {
       break;
     }
     case 'countdown':
-    case 'play': {
+    case 'play':
+    case 'roundEnd': {
       const pauseKey = menuPress.has('Escape') || menuPress.has('KeyP') || anyJoinedEdge('est');
       if (G.paused) {
         if (pauseKey) G.paused = false;
@@ -1128,6 +1145,7 @@ function frameLogic(rdt) {
         break;
       }
       if (pauseKey) { G.paused = true; break; }
+      if (G.state === 'roundEnd') { roundEndTick(rdt); break; }
       if (G.state === 'countdown') {
         G.cd -= rdt;
         const shown = Math.ceil(G.cd - 0.2);
@@ -1137,21 +1155,10 @@ function frameLogic(rdt) {
       if (G.goT > 0) G.goT -= rdt;
       break;
     }
-    case 'roundEnd': {
-      G.endT += rdt;
-      if (G.endT > 1.0) G.timeScale = Math.min(1, G.timeScale + rdt);
-      if (G.endT > 2.6) {
-        if (G.matchWinner >= 0) { G.state = 'matchEnd'; G.scoreT = 0; SFX.fanfare(); makeConfetti(); }
-        else { G.state = 'score'; G.scoreT = 0; }
-        for (const s of SRC) s.jp = false;
-      }
-      break;
-    }
     case 'score': {
       G.scoreT += rdt;
       const go = menuPress.has('Enter') || menuPress.has('Space') || anyJoinedEdge('ej') || anyJoinedEdge('est');
       if ((G.scoreT > 1.0 && go) || G.scoreT > 9) nextRound();
-      if (menuPress.has('Escape')) quitToLobby();
       break;
     }
     case 'matchEnd': {
@@ -1164,6 +1171,15 @@ function frameLogic(rdt) {
   }
   menuPress.clear();
   if (G.state !== 'play' && G.state !== 'countdown' && G.state !== 'roundEnd') for (const s of SRC) s.jp = false;
+}
+function roundEndTick(rdt) {
+  G.endT += rdt;
+  if (G.endT > 1.0) G.timeScale = Math.min(1, G.timeScale + rdt);
+  if (G.endT > 2.6) {
+    if (G.matchWinner >= 0) { G.state = 'matchEnd'; G.scoreT = 0; SFX.fanfare(); makeConfetti(); }
+    else { G.state = 'score'; G.scoreT = 0; }
+    for (const s of SRC) s.jp = false;
+  }
 }
 function tryStart() {
   if (G.state === 'lobby' && joinedSlots().length >= 1) { SFX.go(); startMatch(); }
@@ -1186,13 +1202,22 @@ const FONT = '"Arial Black", "Segoe UI Black", Impact, Verdana, sans-serif';
 function txt(s, x, y, size, color, align = 'center', stroke = 'rgba(0,0,0,0.85)', font = FONT) {
   ctx.font = `900 ${size}px ${font}`;
   ctx.textAlign = align; ctx.textBaseline = 'middle';
-  if (stroke) { ctx.lineWidth = Math.max(3, size / 6); ctx.strokeStyle = stroke; ctx.lineJoin = 'round'; ctx.strokeText(s, x, y); }
+  if (stroke) { ctx.lineWidth = Math.max(size < 16 ? 2.5 : 3, size / 6); ctx.strokeStyle = stroke; ctx.lineJoin = 'round'; ctx.strokeText(s, x, y); }
   ctx.fillStyle = color; ctx.fillText(s, x, y);
 }
-function txtFit(s, x, y, size, color, maxW, align = 'center', stroke, font = FONT) {
+function txtFit(s, x, y, size, color, maxW, align = 'center', stroke, font = FONT, minSize = 10) {
   ctx.font = `900 ${size}px ${font}`;
-  const w = ctx.measureText(s).width;
-  txt(s, x, y, w > maxW ? size * maxW / w : size, color, align, stroke === undefined ? 'rgba(0,0,0,0.85)' : stroke, font);
+  let w = ctx.measureText(s).width, sz = size;
+  if (w > maxW) {
+    sz = Math.max(Math.min(size, minSize), size * maxW / w);
+    ctx.font = `900 ${sz}px ${font}`;
+    if (ctx.measureText(s).width > maxW) {
+      const ch = [...s];
+      while (ch.length > 1 && ctx.measureText(ch.join('') + '…').width > maxW) ch.pop();
+      s = ch.join('') + '…';
+    }
+  }
+  txt(s, x, y, sz, color, align, stroke === undefined ? 'rgba(0,0,0,0.85)' : stroke, font);
 }
 function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
 
@@ -1636,17 +1661,19 @@ function drawHUD() {
     ctx.globalAlpha = p.alive ? 1 : 0.35;
     drawChar(x + 20, y + 38, 0.85, PCOL[p.id], 1, 1, 1, 0, p.finished ? 'happy' : null, false);
     ctx.globalAlpha = 1;
-    txtFit(displayName(p.id), x + 44, y + 13, 12, p.color, 54, 'left');
+    const sl = G.slots[p.id], offline = sl && SRC[sl.src] && SRC[sl.src].type === 'ph' && !SRC[sl.src].connected;
+    const tag = !p.alive ? 'OUT' : p.finished ? 'FINISH' : offline ? '📱OFF' : '';
+    txtFit(displayName(p.id), x + 44, y + 13, 12, p.color, tag ? 42 : 80, 'left');
     for (let k = 0; k < WIN_SCORE; k++) {
       ctx.beginPath(); ctx.arc(x + 48 + k * 16, y + 30, 5.5, 0, TAU);
       ctx.fillStyle = k < G.scores[p.id] ? p.color : 'rgba(255,255,255,0.15)'; ctx.fill();
       ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 1.5; ctx.stroke();
     }
+    if (tag) txtFit(tag, x + cw - 6, y + 13, 10, !p.alive || offline ? '#ff6060' : '#7dff6b', 40, 'right');
     if (!p.alive) {
-      txt('OUT', x + 100, y + 13, 11, '#ff6060', 'center');
       ctx.strokeStyle = '#ff4040'; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.moveTo(x + 10, y + 10); ctx.lineTo(x + 30, y + 34); ctx.moveTo(x + 30, y + 10); ctx.lineTo(x + 10, y + 34); ctx.stroke();
-    } else if (p.finished) txt('FINISH', x + 100, y + 13, 10, '#7dff6b');
+    }
   });
 }
 
