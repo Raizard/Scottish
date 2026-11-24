@@ -7,51 +7,77 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Crush Course Controller</title>
 <style>
-  :root { --bg: #0b0d1a; --bar: #151a33; --zone: #1a1f3a; }
+  :root { --bg: #0b0d1a; --bar: #151a33; --c: #6b7290; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: #fff; overflow: hidden; overscroll-behavior: none;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-  #bar { position: fixed; top: 0; left: 0; right: 0; height: calc(44px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 8px 0;
-    display: flex; align-items: center; gap: 6px; background: var(--bar); z-index: 5; font-size: 13px; }
-  #status { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  #bar { position: fixed; top: 0; left: 0; right: 0; height: calc(46px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 8px 0;
+    display: flex; align-items: center; gap: 6px; background: var(--bar); z-index: 5; font-size: 14px; border-bottom: 3px solid var(--c); }
+  #status { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
   #dot { width: 10px; height: 10px; border-radius: 50%; background: #f5a623; flex: none; }
   #dot.ok { background: #36d26a; } #dot.bad { background: #ff4d4d; }
-  .tb { border: 0; border-radius: 8px; padding: 7px 10px; background: rgba(255,255,255,.12); color: #fff; font: 700 12px inherit; font-family: inherit; }
-  .tb.sel { background: #ffd22e; color: #222; }
-  #start { background: #2fd06a; color: #062; }
-  #pad { position: fixed; top: calc(44px + env(safe-area-inset-top)); left: 0; right: 0; bottom: 0; display: grid; gap: 6px;
-    padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); }
-  body.quad #pad { grid-template: 1fr 1fr / 1fr 1fr; }
-  @media (orientation: portrait) { body.quad #pad { grid-template: repeat(4, 1fr) / 1fr; } }
-  body.single #pad { grid-template: 1fr / 1fr; }
-  body.single .zone:not([data-z="0"]) { display: none; }
-  body.flip .zone[data-z="0"], body.flip .zone[data-z="1"] { transform: rotate(180deg); }
-  .zone { --c: #6b7290; position: relative; display: grid; grid-template-columns: 1fr 1fr 1.25fr; gap: 6px; padding: 26px 6px 6px;
-    border-radius: 16px; background: var(--zone); border: 3px solid var(--c); transition: background .2s; min-height: 0; }
-  .zone.joined { background: color-mix(in srgb, var(--c) 22%, var(--zone)); }
-  .label { position: absolute; top: 4px; left: 0; right: 0; text-align: center; font-weight: 900; font-size: 13px; letter-spacing: .5px; color: var(--c); pointer-events: none; }
-  .btn { display: flex; align-items: center; justify-content: center; border-radius: 12px; background: rgba(255,255,255,.1);
-    font-weight: 900; font-size: clamp(16px, 6vmin, 44px); color: #fff; border: 2px solid rgba(255,255,255,.15); min-height: 0; }
-  .btn.j { background: color-mix(in srgb, var(--c) 45%, transparent); font-size: clamp(14px, 4.5vmin, 34px); }
-  .btn.on { background: rgba(255,255,255,.55); color: #111; transform: scale(.96); }
-  body.single .zone { grid-template-columns: 1fr 1fr 1.6fr; gap: 12px; padding: 34px 12px 12px; }
-  body.single .label { font-size: 18px; top: 8px; }
+  .tb { border: 0; border-radius: 8px; padding: 8px 11px; background: rgba(255,255,255,.12); color: #fff; font: 800 12px system-ui, sans-serif; }
+  #start { background: #2fd06a; color: #04220f; }
+  .screen { position: fixed; top: calc(46px + env(safe-area-inset-top)); left: 0; right: 0; bottom: 0; display: none; }
+
+  /* ---- setup: name + player picker ---- */
+  #setup { overflow-y: auto; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); touch-action: pan-y; }
+  #setup h2 { margin: 4px 0 6px; font-size: 18px; }
+  #name { width: 100%; font: 700 22px system-ui, sans-serif; padding: 10px 12px; border-radius: 12px; border: 2px solid #3a4170; background: #111428; color: #fff; outline: none; user-select: text; -webkit-user-select: text; }
+  #name:focus { border-color: #ffd22e; }
+  .hint { font-size: 12px; opacity: .65; margin: 6px 0 14px; }
+  #picks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (orientation: landscape) { #picks { grid-template-columns: repeat(4, 1fr); } }
+  .pick { border: 3px solid var(--pc); background: color-mix(in srgb, var(--pc) 18%, #111428); color: #fff; border-radius: 16px; padding: 14px 8px; text-align: center; font: inherit; }
+  .pick .sw { width: 46px; height: 54px; margin: 0 auto 8px; border-radius: 12px; background: var(--pc); border: 3px solid rgba(0,0,0,.35); position: relative; }
+  .pick .sw::before, .pick .sw::after { content: ''; position: absolute; top: 14px; width: 10px; height: 13px; border-radius: 50%; background: #fff; }
+  .pick .sw::before { left: 10px; } .pick .sw::after { right: 10px; }
+  .pick b { display: block; font-size: 17px; letter-spacing: .5px; }
+  .pick span { display: block; font-size: 12px; opacity: .8; margin-top: 3px; min-height: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pick.taken { opacity: .38; }
+  .pick.me { box-shadow: 0 0 0 3px #fff inset; }
+  #msg { margin-top: 14px; min-height: 20px; font-size: 14px; color: #ffd27d; text-align: center; }
+  #back { margin-top: 10px; width: 100%; padding: 12px; font-size: 16px; display: none; }
+
+  /* ---- controller ---- */
+  #ctl { display: none; grid-template-columns: 1fr 1fr 1.6fr; grid-template-areas: "l r j"; gap: 12px;
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); touch-action: none; }
+  @media (orientation: portrait) { #ctl { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1.2fr; grid-template-areas: "l r" "j j"; } }
+  #ctl.show { display: grid; }
+  .btn { display: flex; align-items: center; justify-content: center; border-radius: 20px; background: rgba(255,255,255,.09);
+    border: 3px solid rgba(255,255,255,.16); font-weight: 900; font-size: clamp(30px, 11vmin, 80px); color: #fff; }
+  .btn[data-b="1"] { grid-area: l; } .btn[data-b="2"] { grid-area: r; }
+  .btn.j { grid-area: j; background: color-mix(in srgb, var(--c) 55%, transparent); border-color: var(--c); font-size: clamp(26px, 9vmin, 64px); }
+  .btn.on { background: rgba(255,255,255,.6); color: #111; transform: scale(.97); }
   #join { position: fixed; inset: 0; background: var(--bg); display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px; z-index: 10; padding: 20px; text-align: center; }
-  #join input { font-size: 28px; width: 7em; text-align: center; text-transform: uppercase; letter-spacing: 4px; padding: 8px; border-radius: 10px; border: 2px solid #555; background: #111; color: #fff; }
+  #join input { font-size: 28px; width: 7em; text-align: center; text-transform: uppercase; letter-spacing: 4px; padding: 8px; border-radius: 10px; border: 2px solid #555; background: #111; color: #fff; user-select: text; }
   #join button { font-size: 20px; padding: 10px 26px; border-radius: 10px; border: 0; background: #ffd22e; font-weight: 900; }
-  #rot { display: none; }
 </style>
 </head>
-<body class="quad">
+<body>
 <div id="bar">
   <div id="status"><span id="dot"></span><span id="stext">Starting…</span></div>
-  <button class="tb sel" id="mQuad">4P</button>
-  <button class="tb" id="mSingle">1P</button>
-  <button class="tb" id="flip" title="Rotate the top two zones so players across the table can use them">⇅</button>
+  <button class="tb" id="change">Change</button>
   <button class="tb" id="start">START</button>
   <button class="tb" id="fs" title="Fullscreen">⛶</button>
 </div>
-<div id="pad"></div>
+
+<div class="screen" id="setup">
+  <h2>Your name</h2>
+  <input id="name" maxlength="12" placeholder="Type your name" autocomplete="nickname" enterkeyhint="done">
+  <div class="hint">Shown above your character in the game. Saved on this phone.</div>
+  <h2>Pick your player</h2>
+  <div id="picks"></div>
+  <div id="msg"></div>
+  <button class="tb" id="back">Back to controller</button>
+</div>
+
+<div class="screen" id="ctl">
+  <div class="btn" data-b="1">◀</div>
+  <div class="btn" data-b="2">▶</div>
+  <div class="btn j" data-b="4">JUMP</div>
+</div>
+
 <div id="join">
   <h2 style="margin:0">Crush Course controller</h2>
   <div>Enter the room code shown under the QR code on the game screen:</div>
@@ -65,98 +91,132 @@
 const COLORS = [
   { name: 'BLUE', c: '#3b8bff' }, { name: 'RED', c: '#ff4d4d' }, { name: 'GREEN', c: '#2fd06a' }, { name: 'YELLOW', c: '#ffd22e' },
 ];
-const L = 1, R = 2, J = 4;
-const pad = document.getElementById('pad');
-const zones = [];
-for (let z = 0; z < 4; z++) {
-  const el = document.createElement('div');
-  el.className = 'zone'; el.dataset.z = z;
-  el.innerHTML = `<div class="label">TAP JUMP TO JOIN</div>
-    <div class="btn" data-z="${z}" data-b="${L}">◀</div>
-    <div class="btn" data-z="${z}" data-b="${R}">▶</div>
-    <div class="btn j" data-z="${z}" data-b="${J}">JUMP</div>`;
-  pad.appendChild(el);
-  zones.push({ el, label: el.querySelector('.label'), btns: [...el.querySelectorAll('.btn')] });
-}
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+let pid = store.get('cc-pid', '');
+if (!pid) { pid = Math.random().toString(36).slice(2) + Date.now().toString(36); store.set('cc-pid', pid); }
+$('name').value = store.get('cc-name', '');
 
-// ---------- state ----------
-let mode = 'quad', state = [0, 0, 0, 0], assign = [-1, -1, -1, -1], gameState = '';
-let conn = null, peer = null, connected = false, stId = 0, startPending = false;
+// ---------- state from the game ----------
+let lobby = { g: '', my: -1, slots: [] }, gotLobby = false, wantCtl = false, autoPicked = false, screen = '';
+let lastSlot = -1; try { lastSlot = +(sessionStorage.getItem('cc-slot') ?? -1); } catch (e) {}
+let bits = 0, conn = null, peer = null, connected = false, stId = 0, startPending = false;
 const q = new URLSearchParams(location.search);
 let room = (location.hash.slice(1) || q.get('room') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-function setStatus(t, cls) {
-  document.getElementById('stext').textContent = t;
-  document.getElementById('dot').className = cls || '';
+function setStatus(t, cls) { $('stext').textContent = t; $('dot').className = cls || ''; }
+function show(which) {
+  screen = which;
+  $('setup').style.display = which === 'setup' ? 'block' : 'none';
+  $('ctl').classList.toggle('show', which === 'ctl');
+  bits = 0; fingers.clear(); paintButtons();
+  render();
 }
-function renderZones() {
-  zones.forEach((z, i) => {
-    const slot = assign[i];
-    if (slot >= 0) {
-      z.el.style.setProperty('--c', COLORS[slot].c); z.el.classList.add('joined');
-      z.label.textContent = `P${slot + 1} ${COLORS[slot].name}`;
-    } else {
-      z.el.style.setProperty('--c', mode === 'quad' ? COLORS[i].c + '88' : '#6b7290'); z.el.classList.remove('joined');
-      z.label.textContent = gameState && gameState !== 'lobby' ? 'JOIN IN THE LOBBY' : 'TAP JUMP TO JOIN';
-    }
-    z.btns.forEach(b => b.classList.toggle('on', !!(state[i] & +b.dataset.b)));
+function myName() { return (lobby.my >= 0 && lobby.slots[lobby.my] && lobby.slots[lobby.my].n) || ''; }
+function render() {
+  const my = lobby.my, inLobby = lobby.g === 'lobby';
+  document.documentElement.style.setProperty('--c', my >= 0 ? COLORS[my].c : '#6b7290');
+  if (connected) {
+    if (screen === 'ctl' && my >= 0) setStatus(`P${my + 1} · ${myName()}`, 'ok');
+    else setStatus(`Room ${room}`, 'ok');
+  }
+  $('change').style.display = screen === 'ctl' && inLobby ? '' : 'none';
+  $('back').style.display = screen === 'setup' && my >= 0 ? 'block' : 'none';
+  // player picker
+  const box = $('picks'); box.textContent = '';
+  COLORS.forEach((c, i) => {
+    const s = lobby.slots[i] || { t: false, n: c.name, me: false };
+    const b = document.createElement('button');
+    b.className = 'pick' + (s.me ? ' me' : s.t ? ' taken' : '');
+    b.style.setProperty('--pc', c.c);
+    const sw = document.createElement('div'); sw.className = 'sw';
+    const t = document.createElement('b'); t.textContent = `P${i + 1} ${c.name}`;
+    const sub = document.createElement('span');
+    sub.textContent = s.me ? 'You ✓' : s.t ? `Taken by ${s.n}` : (inLobby || !connected ? 'Free · tap to play' : 'Free');
+    b.append(sw, t, sub);
+    b.disabled = s.t && !s.me;
+    b.onclick = () => pick(i);
+    box.appendChild(b);
   });
+  const RUN = 'A match is running. You can join when the game returns to the lobby.';
+  if (connected && gotLobby && !inLobby && my < 0) $('msg').textContent = RUN;
+  else if (inLobby && $('msg').textContent === RUN) $('msg').textContent = '';
 }
+function pick(i) {
+  const name = $('name').value.replace(/\s+/g, ' ').trim().slice(0, 12);
+  store.set('cc-name', name);
+  $('name').blur();
+  if (!connected) { $('msg').textContent = 'Not connected yet…'; return; }
+  $('msg').textContent = '';
+  wantCtl = true;
+  try { sessionStorage.setItem('cc-slot', i); } catch (e) {}
+  lastSlot = i;
+  sendMsg({ t: 'pick', slot: i, name });
+}
+$('name').addEventListener('keydown', e => { if (e.key === 'Enter') $('name').blur(); });
+$('name').addEventListener('change', () => {
+  const name = $('name').value.replace(/\s+/g, ' ').trim().slice(0, 12);
+  store.set('cc-name', name);
+  if (lobby.my >= 0) sendMsg({ t: 'pick', slot: lobby.my, name }); // rename while keeping the player
+});
+$('change').onclick = () => show('setup');
+$('back').onclick = () => show('ctl');
 
-// ---------- multi-touch: every finger is re-checked against the button under it ----------
+// ---------- touch controls (multi-touch, fingers can slide between buttons) ----------
+const ctlEl = $('ctl'), btns = [...ctlEl.querySelectorAll('.btn')];
 const fingers = new Map();
-function btnAt(x, y) { const el = document.elementFromPoint(x, y); return el && el.closest ? el.closest('.btn[data-b]') : null; }
+function btnAt(x, y) { const el = document.elementFromPoint(x, y); return el && el.closest ? el.closest('#ctl .btn') : null; }
+function paintButtons() { btns.forEach(b => b.classList.toggle('on', !!(bits & +b.dataset.b))); }
 function recompute() {
-  const next = [0, 0, 0, 0];
-  for (const el of fingers.values()) if (el) next[+el.dataset.z] |= +el.dataset.b;
-  const jumped = next.some((v, i) => (v & J) && !(state[i] & J));
-  const changed = next.some((v, i) => v !== state[i]);
-  state = next;
-  if (changed) { send(); renderZones(); if (jumped && navigator.vibrate) navigator.vibrate(12); }
+  let next = 0;
+  for (const el of fingers.values()) if (el) next |= +el.dataset.b;
+  if (next === bits) return;
+  if ((next & 4) && !(bits & 4) && navigator.vibrate) navigator.vibrate(12);
+  bits = next; paintButtons(); send();
 }
-pad.addEventListener('pointerdown', e => {
+ctlEl.addEventListener('pointerdown', e => {
   e.preventDefault();
   if (e.target.hasPointerCapture && e.target.hasPointerCapture(e.pointerId)) e.target.releasePointerCapture(e.pointerId);
   fingers.set(e.pointerId, btnAt(e.clientX, e.clientY)); recompute(); keepAwake();
 });
-pad.addEventListener('pointermove', e => { if (fingers.has(e.pointerId)) { fingers.set(e.pointerId, btnAt(e.clientX, e.clientY)); recompute(); } });
-for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) pad.addEventListener(ev, e => { if (ev === 'lostpointercapture') return; fingers.delete(e.pointerId); recompute(); });
+ctlEl.addEventListener('pointermove', e => { if (fingers.has(e.pointerId)) { fingers.set(e.pointerId, btnAt(e.clientX, e.clientY)); recompute(); } });
+for (const ev of ['pointerup', 'pointercancel']) ctlEl.addEventListener(ev, e => { fingers.delete(e.pointerId); recompute(); });
+ctlEl.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 document.addEventListener('contextmenu', e => e.preventDefault());
-document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 window.addEventListener('blur', () => { fingers.clear(); recompute(); });
 
-// ---------- toolbar ----------
-function setMode(m) {
-  mode = m; document.body.className = m + (document.body.classList.contains('flip') ? ' flip' : '');
-  document.getElementById('mQuad').classList.toggle('sel', m === 'quad');
-  document.getElementById('mSingle').classList.toggle('sel', m === 'single');
-  document.getElementById('flip').style.display = m === 'quad' ? '' : 'none';
-  fingers.clear(); state = [0, 0, 0, 0];
-  try { localStorage.setItem('cc-mode', m); } catch (e) {}
-  send(); renderZones();
-}
-document.getElementById('mQuad').onclick = () => setMode('quad');
-document.getElementById('mSingle').onclick = () => setMode('single');
-document.getElementById('flip').onclick = e => { document.body.classList.toggle('flip'); e.currentTarget.classList.toggle('sel'); };
-document.getElementById('start').onclick = () => { stId++; startPending = true; send(); if (navigator.vibrate) navigator.vibrate(20); };
-document.getElementById('fs').onclick = () => {
+$('start').onclick = () => { stId++; startPending = true; send(); if (navigator.vibrate) navigator.vibrate(20); };
+$('fs').onclick = () => {
   const d = document.documentElement;
   if (!document.fullscreenElement) (d.requestFullscreen || d.webkitRequestFullscreen || (() => {})).call(d);
   else document.exitFullscreen && document.exitFullscreen();
 };
-if (!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen)) document.getElementById('fs').style.display = 'none';
+if (!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen)) $('fs').style.display = 'none';
 let wake = null;
 async function keepAwake() { try { if (!wake && navigator.wakeLock) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => wake = null); } } catch (e) {} }
 
-// ---------- networking ----------
+// ---------- networking (PeerJS / WebRTC straight to the game) ----------
+function sendMsg(m) { if (conn && connected) try { conn.send(m); } catch (e) {} }
 function send() {
-  if (!conn || !connected) return;
-  const msg = { t: 's', b: state, m: mode };
-  if (startPending) { msg.st = 1; msg.stId = stId; startPending = false; }
-  try { conn.send(msg); } catch (e) {}
+  const m = { t: 's', b: screen === 'ctl' ? bits : 0 };
+  if (startPending) { m.st = 1; m.stId = stId; startPending = false; }
+  sendMsg(m);
 }
 setInterval(send, 250); // heartbeat so the game knows we're still here
 
+function onLobby(m) {
+  lobby = m;
+  const firstLobby = !gotLobby; gotLobby = true;
+  if (m.my >= 0 && (wantCtl || firstLobby || screen !== 'setup')) { wantCtl = false; if (screen !== 'ctl') show('ctl'); }
+  else if (m.my < 0 && screen === 'ctl') show('setup');
+  // after a reload/reconnect in the lobby, grab the same player again if it's still free
+  if (!autoPicked && m.my < 0 && m.g === 'lobby' && lastSlot >= 0 && m.slots[lastSlot] && !m.slots[lastSlot].t) { autoPicked = true; pick(lastSlot); }
+  autoPicked = true;
+  render();
+}
 function peerOptions() {
   const o = { config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] } };
   if (q.get('peerhost')) { o.host = q.get('peerhost'); o.port = +q.get('peerport') || 9000; o.path = q.get('peerpath') || '/'; o.secure = q.get('peersecure') === '1'; }
@@ -171,10 +231,21 @@ function connect() {
   if (conn) { try { conn.close(); } catch (e) {} }
   const c = peer.connect('crushcourse-' + room.toLowerCase(), { reliable: true, serialization: 'json' });
   conn = c;
-  const t = setTimeout(() => { if (conn === c && !connected) { setStatus('Still connecting… are you on the same Wi-Fi?', 'bad'); retry(500); } }, 12000);
-  c.on('open', () => { clearTimeout(t); connected = true; setStatus(`Room ${room}`, 'ok'); send(); });
-  c.on('data', msg => { if (msg && msg.t === 'a') { assign = msg.s; gameState = msg.g; renderZones(); } });
-  c.on('close', () => { if (conn !== c) return; connected = false; assign = [-1, -1, -1, -1]; renderZones(); setStatus('Disconnected — reconnecting…', 'bad'); retry(2000); });
+  const t = setTimeout(() => { if (conn === c && !connected) { setStatus('Still connecting… same Wi-Fi as the game?', 'bad'); retry(500); } }, 12000);
+  c.on('open', () => {
+    clearTimeout(t); connected = true; autoPicked = false; gotLobby = false;
+    sendMsg({ t: 'hello', pid, name: $('name').value.trim().slice(0, 12) });
+    render();
+  });
+  c.on('data', m => {
+    if (!m || typeof m !== 'object') return;
+    if (m.t === 'l') onLobby(m);
+    else if (m.t === 'msg') { $('msg').textContent = String(m.text || ''); if (screen !== 'setup') show('setup'); }
+  });
+  c.on('close', () => {
+    if (conn !== c) return;
+    connected = false; setStatus('Disconnected — reconnecting…', 'bad'); retry(2000);
+  });
   c.on('error', () => {});
 }
 function startPeer() {
@@ -183,7 +254,7 @@ function startPeer() {
   peer = new Peer(peerOptions());
   peer.on('open', connect);
   peer.on('error', err => {
-    if (err.type === 'peer-unavailable') { setStatus(`Game ${room} not found — is the game open?`, 'bad'); retry(3000); }
+    if (err.type === 'peer-unavailable') { connected = false; setStatus(`Game ${room} not found — is the game open?`, 'bad'); retry(3000); }
     else if (['network', 'server-error', 'socket-error', 'socket-closed', 'disconnected'].includes(err.type)) { setStatus('Network problem — retrying…', 'bad'); retry(3000); }
     else setStatus('Error: ' + err.type, 'bad');
   });
@@ -191,13 +262,12 @@ function startPeer() {
 }
 
 // ---------- boot ----------
-try { const m = localStorage.getItem('cc-mode'); if (m === 'single') setMode('single'); } catch (e) {}
-renderZones();
+show('setup');
 if (room.length === 5) startPeer();
 else {
-  const j = document.getElementById('join'); j.style.display = 'flex';
-  document.getElementById('go').onclick = () => {
-    const v = document.getElementById('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const j = $('join'); j.style.display = 'flex';
+  $('go').onclick = () => {
+    const v = $('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (v.length !== 5) return;
     room = v; location.hash = v; j.style.display = 'none'; startPeer();
   };

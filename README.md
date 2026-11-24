@@ -17,21 +17,31 @@ Double-click `index.html`. It opens in Chrome; no server is needed.
 
 Gamepads (up to 4) use the left stick or D-pad to move and **A** (the bottom button) to jump. Start begins the match or pauses; B leaves the lobby.
 
-**Lobby:** each player presses jump to join. Enter or Start begins the match (2–4 players; 1 player gives solo practice). C, Tab, `[` `]`, LB/RB or Select changes the course mode (Grand Tour, Shuffle, or a single course). Backspace removes the last player who joined.
+**Lobby:** each keyboard or gamepad player presses jump to join (phones pick a colour on the phone). Enter or Start begins the match (2–4 players; 1 player gives solo practice). C, Tab, `[` `]`, LB/RB or Select changes the course mode (Grand Tour, Shuffle, or a single course). Backspace removes the last player who joined.
 
 **Anywhere:** F = fullscreen (there is also a button in the top-right corner), M = cycle sound, music off, mute, Esc/P = pause (Q quits to the lobby).
 
 Players collide with each other. You can stand on someone's head, ride on top of them, and get launched when the player under you jumps. A fast charge shoulder-bumps other players, which is handy for knocking them into pits.
 
 ## Phone controllers (scan the QR code)
-When the game is opened from its web link (for example `https://crush-course.pages.dev`), the lobby shows a **QR code** in the top-left corner. Scan it with a phone to open `controller.html`, which turns the phone into a controller:
+Each phone is one player. Four players can be 4 phones, or any mix such as 1 keyboard + 3 phones, or 2 gamepads + 2 phones.
 
-- **4P mode:** the screen splits into 4 colour zones (Blue, Red, Green, Yellow), each with ◀ ▶ JUMP, so 4 people can share one phone. Hold the phone sideways for a 2×2 grid; upright gives 4 stacked rows. The ⇅ button flips the top zones for players sitting across a table.
-- **1P mode:** one big full-screen controller, so each player can scan with their own phone.
-- Tap **JUMP** in a zone to join; that zone's player slot lights up in the lobby. **START** on the phone starts the match or pauses it.
-- If the camera can't scan, open `/controller.html` on the phone and type the 5-letter room code shown under the QR code.
+When the game is opened from its web link (for example `https://scottish-7qd.pages.dev`), the lobby shows a **QR code** in the top-left corner. On each phone:
+1. Scan the QR code. It opens `controller.html`.
+2. Type your **name** (the phone remembers it).
+3. Tap a free colour (Blue, Red, Green or Yellow). Colours other players already have are greyed out and show their names.
+4. The phone becomes one big controller with ◀ ▶ JUMP. **START** starts the match or pauses it; **Change** (lobby only) lets you pick another colour or rename.
 
-The phone connects straight to the game with WebRTC. The free public PeerJS service introduces the two devices (PeerJS and the QR generator load from the jsDelivr CDN). It works best when the phone and PC are on the **same Wi-Fi**. The QR code doesn't appear when `index.html` is opened by double-clicking it; keyboard and gamepads still work offline as before.
+If a phone reloads or drops out mid-match, it gets its player back when it reconnects. If the camera can't scan, open `/controller.html` and type the 5-letter room code shown under the QR code.
+
+The phone connects straight to the game with WebRTC. The free public PeerJS service introduces the two devices (PeerJS and the QR generator load from the jsDelivr CDN). It works best when the phones and the PC are on the **same Wi-Fi**. The QR code doesn't appear when `index.html` is opened by double-clicking it; keyboard and gamepads still work offline.
+
+## Player names
+There's no backend, so each device stores names locally:
+- **Phone players** type their name on the phone. It's saved on that phone and sent to the game when it connects.
+- **Keyboard/gamepad players** click their player card in the lobby and type a name. It's saved in that browser.
+
+Names appear above each character, on the HUD, in "BLOCKED OUT!" pop-ups, on round and match win banners, and on the scoreboard.
 
 ## Courses
 1. **Meadow Dash**: the warm-up, with spikes, pits, first crushers and a spring wall
@@ -39,6 +49,13 @@ The phone connects straight to the game with WebRTC. The free public PeerJS serv
 3. **Saw Mill**: rail saws, bobbing saws, orbiting saws and a moving platform
 4. **Sky Bridges**: crumbling bridges, moving platforms and pillar hops
 5. **The Gauntlet**: everything together, over lava
+6. **Frostbite Peaks**: snowy climbs over spike beds, ice bridges and a spring launch over a chasm
+7. **Dune Sprint**: a fast desert dash with rail saws, pits and pillar hops
+8. **Steel Foundry**: crusher gauntlets, crusher pits and a spiked ceiling
+9. **Haunted Hollow**: orbiting saws, crumbling bridges and toxic goo
+10. **Final Ascent**: the fastest course, with every trap in the game
+
+Course modes in the lobby: **Grand Tour** (all 10 in order), **Starter Tour** (1–5), **Pro Tour** (6–10), **Shuffle**, or any single course.
 
 ## Deploy to Cloudflare
 - **Pages:** connect this repo, leave the framework preset as *None* and the build command empty, and set the output directory to `/`.
